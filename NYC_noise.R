@@ -1,3 +1,5 @@
+#Requires dataset downloaded from the "party_in_nyc" file from github repository
+#I do not own any of this data
 library(shiny)
 library(tidyverse)
 library(modelr)
