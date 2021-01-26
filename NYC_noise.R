@@ -1,5 +1,6 @@
 #Requires dataset downloaded from the "party_in_nyc" file from github repository
-#I do not own any of this data
+#This data is not owned by me (Owen Mastalir) and was acquired via https://www.kaggle.com/somesnm/partynyc) 
+
 library(shiny)
 library(tidyverse)
 library(modelr)
