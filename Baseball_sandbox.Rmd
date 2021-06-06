@@ -1,0 +1,1005 @@
+---
+title: "Baseball_sandbox"
+author: "Owen Mastalir"
+date: "5/10/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(magrittr)
+library(lubridate)
+library(ggplot2)
+library(hrbrthemes)
+library(dplyr)
+library(gganimate)
+library(gifski)
+library(baseballDBR)
+library(baseballr)
+library(rgl)
+library(magick)
+library(ggforce)
+library(latex2exp)
+library(patchwork)
+library(png)
+library(caret)
+library(glmnet)
+library(reshape2)
+library(corrplot)
+
+
+trackman_poly <- read_csv("~/Downloads/Copy of Trackman20-21 - Sheet1.csv")
+trackman_2020 <- read_csv("~/Downloads/Copy of TrackManDB - Sheet1.csv")
+poly_hitters <- read_csv("~/Downloads/Copy of Trackman20-21 - Sheet2 (1).csv")
+all_pitches <- read_csv("~/Downloads/Copy of TrackManDB - Sheet1 (1).csv")
+conf_WL <- read_csv("~/Downloads/Copy of Trackman20-21 - W_L (1).csv")
+conf_hitting <- read_csv("~/Downloads/Copy of Trackman20-21 - Hitting.csv")
+conf_exthit <- read_csv("~/Downloads/Copy of Trackman20-21 - ExtHit.csv")
+conf_pitching <- read_csv("~/Downloads/Copy of Trackman20-21 - Pitching.csv")
+conf_fielding <- read_csv("~/Downloads/Copy of Trackman20-21 - Fielding.csv")
+conf_slg <- read_csv("~/Downloads/Copy of Trackman20-21 - SLG.csv")
+```
+
+```{r intitial plots}
+cols.want <- c("GP.x", "HBP", "SF", "SH", "TB", "XBH", "HDP", "GO", "FO", "PA", "GP.y", "AB", "R.x", "H.x", "2B", "3B", "HR.x", "RBI", "BB.x", "K.x", "SB", "CS", "AVG", "OBP", "SLG", "GP.x.x", "IP", "H.y", "R.y", "ER", "BB.y", "K.y", "K/9", "HR.y", "ERA", "GP.y.y", "TC", "PO", "A", "E", "FPCT", "DP", "SBA", "RCS", "GP", "GP_1", "PCT", "PCT_1") 
+
+regression_df <- overall_df[, names(overall_df) %in% cols.want, drop = F]
+regression_df
+
+conf_stats %>% 
+  rename(NAME = Team) -> conf_stats
+
+conf_stats <- conf_stats[,-2]
+
+trackman %>% 
+  group_by(PlayResult) %>% 
+  summarise(res_counts = n())
+
+trackman_poly %>% 
+  dplyr::filter(PlayResult == "Single" | 
+                  PlayResult == "Double" | 
+                  PlayResult == "Triple" | 
+                  PlayResult == "HomeRun") %>% 
+  dplyr::filter(BatterTeam == "CAL_MUS") -> poly_hits
+
+trackman_2020 %>% 
+  dplyr::filter(PlayResult == "Single" | 
+                  PlayResult == "Double" | 
+                  PlayResult == "Triple" | 
+                  PlayResult == "HomeRun") %>% 
+  dplyr::filter(BatterTeam == "CAL_MUS") -> hits_2020
+
+trackman_poly %>% 
+  filter(Angle > 10 & Angle < 35) %>% 
+  group_by(Batter) %>% 
+  summarise(best_batter = n()) %>% 
+  arrange(desc(best_batter))
+
+trackman %>% 
+  mutate(hit_bin = case_when(PlayResult == "Single" | 
+                               PlayResult == "Double" | 
+                               PlayResult == "Triple" | 
+                               PlayResult == "HomeRun" ~ 1, 
+                              T ~ 0)) -> trackman
+
+trackman_2020 %>% 
+  mutate(hit_bin = case_when(PlayResult == "Single" | 
+                               PlayResult == "Double" | 
+                               PlayResult == "Triple" | 
+                               PlayResult == "HomeRun" ~ 1, 
+                              T ~ 0)) -> trackman_2020
+
+trackman %>% 
+  select(PlayResult, hit_bin)
+
+poly_hits %>% 
+  select(Batter, Angle) %>% 
+  group_by(Batter) %>% 
+  summarise(best_batter = n()) %>% 
+  arrange(desc(best_batter)) %>% 
+  ggplot(aes(x=Batter, y=Angle)) + 
+  geom_boxplot() + 
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90))
+
+ggplot(trackman, aes(x=Batter, y=Angle)) + 
+  geom_boxplot() + 
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90))
+
+ggplot(trackman_2020, aes(x=Batter, y=ExitSpeed)) + 
+  geom_boxplot() + 
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90))
+
+ggplot(hits, aes(x = ExitSpeed, y = Angle)) +
+  geom_point(aes(color = PlayResult)) +
+  scale_color_manual(values=c("#F2C75C", "#54585A", "#3A913F", "#ABCAE9")) + 
+  theme_classic() +
+  annotate("rect", xmin = 87, xmax = 106, ymin = 10, ymax = 30,
+        alpha = .4) +
+  theme(legend.position = c(.2,.6)) +
+  labs(color = 'Grey box is MLB "ideal" hit')
+
+
+ggplot(hits_2020, aes(x = ExitSpeed, y = Angle)) +
+  geom_point(aes(color = TaggedPitchType)) +
+  scale_color_manual(values=c("#F2C75C", "#54585A", "#3A913F", "#ABCAE9", "red")) + 
+  theme_classic() +
+  annotate("rect", xmin = 87, xmax = 106, ymin = 10, ymax = 30,
+        alpha = .4) +
+  theme(legend.position = c(.2,.6)) +
+  labs(color = 'Grey box is MLB "ideal" hit')
+
+ggplot(hits_2020, aes(x = ExitSpeed, y = Angle)) +
+  geom_point(aes(color = PlayResult)) +
+  scale_color_manual(values=c("#F2C75C", "#54585A", "#3A913F", "#ABCAE9", "red")) + 
+  theme_classic() +
+  theme(legend.position = c(.2,.6)) +
+  labs(color = 'Hit Result')
+
+ggplot(all_pitches %>% 
+         filter(PlayResult != "Undefined" & 
+                  PlayResult != "FieldersChoice"), 
+       aes(x = ExitSpeed, y = Angle)) +
+  geom_point(aes(color = PlayResult)) +
+  #scale_color_manual(values=c("#F2C75C", "#54585A", "#3A913F", "#ABCAE9", "red")) + 
+  theme_classic() +
+  annotate("rect", xmin = 87, xmax = 106, ymin = 10, ymax = 35,
+        alpha = .4) +
+  #theme(legend.position = c(.2,.6)) +
+  labs(color = 'Grey box is MLB "ideal" hit')
+
+trackman %>% 
+  group_by(HitType) %>% 
+  summarize(tot = n())
+```
+
+```{r launch angle stuff}
+hitter <- image_read("~/Downloads/baseball-hitter-silhouette-2.png")
+batter <- readPNG("~/Downloads/baseball-hitter-silhouette-2.png", native = TRUE)
+
+trackman_poly %>% 
+  filter(Angle > 10 & Angle < 35) %>% 
+  group_by(Batter) %>% 
+  summarise(best_batter = n()) %>% 
+  arrange(desc(best_batter))
+
+ggplot(hits_2020, aes(x = ExitSpeed, y = Angle)) +
+  geom_point(aes(color = PlayResult)) +
+  scale_color_manual(values=c("#F2C75C", "#54585A", "#3A913F", "#ABCAE9", "red")) + 
+  theme_classic() +
+  annotate("rect", xmin = 70, xmax = 106, ymin = 10, ymax = 30,
+        alpha = .4) + 
+  theme(legend.position = c(.15,.7)) +
+  labs(color = 'Hit Result') +
+  xlab("Exit Speed (mph)") +
+  ylab("Launch Angle")
+
+hits_2020 %>% 
+  filter(Angle > 10 & Angle < 35) %>% 
+  group_by(PlayResult) %>% 
+  summarise(tot_line = n()) -> df_1
+
+hits_2020 %>% 
+  group_by(PlayResult) %>% 
+  summarise(tot = n()) -> df_2
+
+df <- left_join(df_1, df_2)
+
+df %>% 
+  mutate(perc = tot_line/tot) -> df
+
+all_hits %>% 
+  drop_na(Angle) %>% 
+  group_by(Batter) %>% 
+  summarise(avg_launch = mean(Angle)) %>% 
+  arrange(desc(avg_launch))
+
+all_hits %>% 
+  mutate(elite_bin = case_when( 
+                                 #BatterId == 1000001375 | 
+                                 #BatterId == 1000025387 
+                                 #| 
+                                 #BatterId == 1000016591 
+                                 #BatterId == 1000001360  
+                                 BatterId == 1000025385 
+                               ~ TRUE, 
+                               TRUE ~ FALSE)) -> all_hits
+
+all_hits %>% 
+  mutate(Xcoord = ExitSpeed / 120 *
+             cos(Angle * pi / 180),
+       Ycoord = ExitSpeed / 120 *
+             sin(Angle * pi / 180)) -> all_hits
+
+ggplot(all_hits %>% 
+         group_by(BatterId) %>%
+         filter(n()>2 & ExitSpeed > 50 & Angle > -45), aes(x=as.factor(BatterId), 
+                                                           y=Angle, fill = elite_bin)) + 
+  geom_boxplot() + 
+  scale_fill_manual(values=c("#3A913F", "#F2C75C")) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 270, size = 8),
+        #axis.title.x = element_text(size = 0),
+        legend.position = "none") +
+  xlab("Batter ID") + 
+  ylab("Launch Angle of All Hits by Batter") +
+  annotate(geom="text", x=9, y=37, label="Highest on \nbase percentage \nand launch angle",
+           fontface = 2) +
+  geom_curve(
+  aes(x = 9, y = 30, xend = 11, yend = 20),
+  data = all_hits,
+  arrow = arrow(length = unit(0.03, "npc")))
+```
+
+```{r linear on OBP vs WP}
+lm(Overall_WP ~ OBP -1, conf_stats) -> OBP_lm
+
+summary(OBP_lm)
+
+lm(Conf_WP ~ OBP -1, conf_stats) -> Conf_lm
+
+summary(Conf_lm)
+
+conf_stats %>% 
+  arrange(desc(OBP))
+
+conf_stats %>% 
+  arrange(desc(Overall_WP))
+```
+
+```{r radial chart}
+all_hits %>% 
+  mutate(Xcoord = ExitSpeed / 120 *
+             cos(Angle * pi / 180),
+       Ycoord = ExitSpeed/ 120 *
+             sin(Angle * pi / 180)) -> all_hits
+
+circleFun <- function(center=c(0,0), diameter=1, npoints=100, start=0, end=2){
+  tt <- seq(start*pi, end*pi, length.out=npoints)
+  data.frame(
+    x1 = (center[1] - diameter / 2 * cos(tt))*2,
+    y1 = (center[2] - diameter / 2 * sin(tt))*2,
+    x2 = center[1] - diameter / 2 * cos(tt), 
+    y2 = center[2] - diameter / 2 * sin(tt)
+  )
+}
+
+dat <- circleFun(c(0,0), start=1.5, end=.5)
+
+ggplot() +
+      coord_equal() +
+      geom_polygon(data = dat, aes(x1, y1),
+                 fill = "#A4D65E") +
+      geom_polygon(data = dat, aes(x2, y2),
+                 fill = "#E4E1D1")-> plot2
+
+(plot2 <- plot2 +
+    geom_segment(aes(x = 0, y = 0, 
+                     xend = cos(pi / 4), 
+                     yend = sin(pi / 4)),
+                 color = "#F2C75C") +
+    geom_segment(aes(x = 0, y = 0, 
+                     xend = 1, 
+                     yend = 0),
+                 color = "#F2C75C"))
+
+(plot3 <- plot2 +
+  geom_point(data = all_hits %>% 
+               filter(HitType != "Undefined" & HitType != "Popup"), 
+               aes(Xcoord, Ycoord,
+               color = HitType),
+               size = 2, 
+             alpha = .5))
+plot3
+
+(plot4 <- plot3 + 
+annotate(geom = "text", x = 0.75, y = 0.75,
+             label = TeX("45^o"), color = "#F2C75C") +
+    annotate(geom = "text", x = 1.05, y = 0,
+             label = TeX("0^o"), color = "#F2C75C") +
+    annotate(geom = "text", x = .07, y = 1.05,
+             label = TeX("90^o"), color = "#F2C75C") +
+    annotate(geom = "text", x = .07, y = -1.05,
+             label = TeX("-90^o"), color = "#F2C75C") +
+    annotate(geom = "text", x = 0.55, y = 0.91,
+             label = "120 mph", color = "black") +
+    annotate(geom = "text", x = 0.2, y = 0.45,
+             label = "60 mph", color = "black")) 
+
+plot4 +
+  theme(panel.grid = element_blank(),
+          axis.title = element_blank(),
+          axis.text = element_blank(),
+          axis.ticks = element_blank(),
+          panel.background = element_blank()) +
+    xlim(0, 1.1) +
+    ylim(-1.1, 1.1) +
+    ggtitle("Radial Plot of Balls in Play") +
+    theme(plot.title = element_text(colour = "black", 
+                    size = 18,
+          hjust = 0.5, vjust = 0.8, angle = 0)) +
+    inset_element(p = batter,
+                  left = 0.3 - 0.52,
+                  bottom = 0.425,
+                  right = 0.46 - 0.42,
+                  top = 0.565)
+```
+
+```{r OB probs}
+trackman_2020 %>% 
+  dplyr::filter(HitType != "Bunt") %>% 
+  group_by(HitType) %>% 
+  summarize(tot = n())
+
+logit2prob <- function(logit){
+  odds <- exp(logit)
+  prob <- odds / (1 + odds)
+  return(prob)
+}
+
+hit_log <- glm(formula = hit_bin ~ HitType, family = "binomial", data = trackman_2020 
+               %>% dplyr::filter(HitType != "Bunt")
+               )
+
+summary(hit_log)
+
+coefficients(hit_log) -> hit_log_coef
+
+hit_log_coef
+
+exp(hit_log_coef[1])/(1+exp(hit_log_coef[1]))
+
+exp(hit_log_coef[1] + hit_log_coef[2])/
+  (1+exp(hit_log_coef[1] + hit_log_coef[2]))
+
+exp(hit_log_coef[1] + hit_log_coef[2] + hit_log_coef[3])/
+  (1+exp(hit_log_coef[1] + hit_log_coef[2] + hit_log_coef[3]))
+
+exp(hit_log_coef[1] + hit_log_coef[2] + hit_log_coef[3] + hit_log_coef[4])/
+  (1+exp(hit_log_coef[1] + hit_log_coef[2] + hit_log_coef[3] + hit_log_coef[4]))
+
+exp(hit_log_coef[1] + hit_log_coef[2] + hit_log_coef[3] + hit_log_coef[4] + hit_log_coef[5])/
+  (1+exp(hit_log_coef[1] + hit_log_coef[2] + hit_log_coef[3] + hit_log_coef[4] + hit_log_coef[5]))
+```
+
+```{r static plate pic}
+trackman %>% 
+  filter(Angle > 10 & Angle < 35) %>% 
+  group_by(Batter) %>% 
+  summarise(best_batter = n()) %>% 
+  arrange(desc(best_batter)) 
+
+poly_hitters %>% 
+  select(Player, `OB%`) %>% 
+  arrange(desc(`OB%`))
+
+ggplot(all_pitches %>% 
+         filter(PlayResult != "Undefined" & 
+                  PlayResult != "FieldersChoice" &
+                  PlayResult != "Error" &
+                  PlayResult != "Out" & 
+                  PlayResult != "Sacrifice"), 
+       aes(x = PlateLocSide, y = PlateLocHeight)) +
+  geom_point(aes(color = PlayResult)) +
+  scale_color_manual(values=c("#F2C75C", "#54585A", "#3A913F", "#ABCAE9", "red")) + 
+  theme_minimal() +
+  annotate("rect", xmin = -1, xmax = 1, ymin = 1, ymax = 3.5,
+        alpha = .2) +
+  labs(color = 'Grey box is strike zone') +
+  theme(axis.title.x = element_text(size = 0), 
+        axis.title.y = element_text(size = 0), 
+        axis.ticks.x = element_line(size = 0), 
+        axis.ticks.y = element_line(size = 0), 
+        axis.line.x = element_line(size = 0), 
+        axis.line.y = element_line(size = 0), 
+        axis.text.x = element_text(size = 0),
+        axis.text.y = element_text(size = 0))
+
+all_pitches %>% 
+         filter(PlayResult != "Undefined" & 
+                  PlayResult != "FieldersChoice" &
+                  PlayResult != "Error" &
+                  PlayResult != "Out" & 
+                  PlayResult != "Sacrifice") -> all_hits
+```
+
+```{r baseball r failure}
+hitting_spreads <- all_pitches %>% 
+  filter(PlayResult %in% c("Single", "Double", "Triple", "HomeRun")) %>% 
+  mutate(events = factor(PlayResult, levels = c("Single", "Double", "Triple", "HomeRun"),
+                         labels = c("Single", "Double", "Triple", "Home Run"))) %>% 
+  ggspraychart(fill_value = "events", 
+               fill_palette = c("Single"="#A2C8EC", "Double"="#006BA4", 
+                                "Triple"="#FF940E", "Home Run"="#C85200")) + 
+  labs(title = "Hit date: {frame_time}") + 
+  transition_reveal(Date, Date) + 
+  theme(
+    legend.title = element_blank(),
+    plot.title = element_text(size = 14),
+    plot.caption = element_text(size = 10, face = "bold"),
+    legend.text = element_text(size = 12, face = "bold")
+  )
+```
+
+```{r prepping hits}
+all_hits %>% 
+mutate(Date_time = as_datetime(paste0(Date,Time))) -> all_hits
+
+all_hits %>% 
+ggplot(aes(PlateLocSide, PlateLocHeight, color = PlayResult)) + 
+  geom_point() +
+  theme(legend.title = element_blank()) -> myplot 
+
+animateplot <- myplot + transition_time(all_hits$Date) +
+  shadow_mark(past = T, future = F) +
+  xlab("") + ylab("Hit")
+
+animate(animateplot, width = 700, height = 500)
+```
+
+```{r hitting gif - PlayResult n angle}
+all_hits %>% 
+  mutate(LAVal = case_when(
+		Angle < 0 ~ "<0", 
+		Angle > 0 & Angle < 25 ~ "0-25",
+		Angle >25 & Angle < 50 ~ "25-50",
+		Angle > 50 ~ "50+")) %>% 
+  filter(!is.na(LAVal))-> all_hits
+
+a <- ggplot(all_hits, aes(PlateLocSide, PlateLocHeight, 
+                          color = factor(all_hits$LAVal, levels = c("<0", 
+                                                                 "0-25", 
+                                                                 "25-50", 
+                                                                 "50+")),
+                          size = factor(all_hits$PlayResult, levels = c("Single", 
+                                                                 "Double", 
+                                                                 "Triple", 
+                                                                 "HomeRun")),
+                          group = PitchNo)) +
+  geom_point() +
+  scale_color_manual(values=c("#F2C75C", "#54585A", "#3A913F", "#ABCAE9")) + 
+  theme_minimal() +
+  annotate("rect", xmin = -1, xmax = 1, ymin = 1, ymax = 3.5,
+        alpha = .2) +
+  labs(color = 'Launch Angle', size = "Play Result") +
+  theme(axis.title.x = element_text(size = 0), 
+        axis.title.y = element_text(size = 0), 
+        axis.ticks.x = element_line(size = 0), 
+        axis.ticks.y = element_line(size = 0), 
+        axis.line.x = element_line(size = 0), 
+        axis.line.y = element_line(size = 0), 
+        axis.text.x = element_text(size = 0),
+        axis.text.y = element_text(size = 0)) +
+  transition_time(second(Time)) + 
+  shadow_mark() 
+
+animate(a, nframes = 70)
+
+anim_save("hitting gif", animation = last_animation(), path = "~/Desktop")
+```
+
+```{r hitting still}
+ggplot(all_hits, aes(PlateLocSide, PlateLocHeight, 
+                          color = factor(all_hits$LAVal, levels = c("<0", 
+                                                                 "0-25", 
+                                                                 "25-50", 
+                                                                 "50+")),
+                          size = factor(all_hits$PlayResult, levels = c("Single", 
+                                                                 "Double", 
+                                                                 "Triple", 
+                                                                 "HomeRun")),
+                          group = PitchNo)) +
+  geom_point() +
+  scale_color_manual(values=c("#F2C75C", "#54585A", "#3A913F", "#ABCAE9")) + 
+  theme_minimal() +
+  annotate("rect", xmin = -1, xmax = 1, ymin = 1, ymax = 3.5,
+        alpha = .2) +
+  labs(color = 'Launch Angle', size = "Play Result") +
+  theme(axis.title.x = element_text(size = 0), 
+        axis.title.y = element_text(size = 0), 
+        axis.ticks.x = element_line(size = 0), 
+        axis.ticks.y = element_line(size = 0), 
+        axis.line.x = element_line(size = 0), 
+        axis.line.y = element_line(size = 0), 
+        axis.text.x = element_text(size = 0),
+        axis.text.y = element_text(size = 0))
+```
+
+```{r gif #2}
+ggplot(all_hits %>% 
+         filter(AutoPitchType != "Other" & 
+                AutoPitchType != "Undefined"), 
+       aes(PlateLocSide, PlateLocHeight, color = AutoPitchType,
+                            group = day(Date_time))) +
+  geom_point() +
+  #scale_color_manual(values=c("#F2C75C", "#54585A", "#3A913F", "#ABCAE9", "red")) + 
+  theme_minimal() +
+  annotate("rect", xmin = -1, xmax = 1, ymin = 1, ymax = 3.5,
+        alpha = .2) +
+  labs(color = 'Grey box is strike zone', 
+       title = "Hits by Pitch Type") +
+  theme(axis.title.x = element_text(size = 0), 
+        axis.title.y = element_text(size = 0), 
+        axis.ticks.x = element_line(size = 0), 
+        axis.ticks.y = element_line(size = 0), 
+        axis.line.x = element_line(size = 0), 
+        axis.line.y = element_line(size = 0), 
+        axis.text.x = element_text(size = 0),
+        axis.text.y = element_text(size = 0), 
+        legend.position = "none") +
+  facet_wrap(vars(AutoPitchType))
++
+  transition_time(day(Date_time)) +
+  shadow_mark(size = 1) +
+  enter_fade()  -> hit_gif_type
+# I liked the look of this, but fine to leave out
+animate(hit_gif_type, nframes = 100)
+
+anim_save("hitting gif pitchtype", animation = last_animation(), path = "~/Desktop")
+```
+
+```{r 3d trying}
+all_hits %>% 
+  select(PositionAt110X, PositionAt110Y, PositionAt110Z, PlayResult, color) -> dimension_df
+
+dimension_df %>% 
+  drop_na(PositionAt110X) -> dimension_df
+
+colors <- c('royalblue1', 'darkcyan', 'oldlace', 'red')
+#dimension_df$color <- colors[ as.numeric(dimension_df$PlayResult) ]
+
+# Static chart
+par(mar=c(0,0,0,0))
+plot3d(x = dimension_df$PositionAt110X, 
+       y = dimension_df$PositionAt110Y, 
+       z = dimension_df$PositionAt110Z, 
+       col = dimension_df$color, 
+       type = "s", radius = .1)
+
+# We can indicate the axis and the rotation velocity
+play3d(spin3d(axis = c(0, 0, 1), rpm = 3), duration = 4)
+```
+
+```{r merging}
+overall_df <- full_join(conf_exthit, conf_hitting, by = c("NAME","Year"))
+
+overall_df <- full_join(overall_df, conf_pitching, by = c("NAME", "Year"))
+
+overall_df <- full_join(overall_df, conf_fielding, by = c("NAME", "Year"))
+
+overall_df <- full_join(overall_df, conf_WL, by = c("NAME", "Year"))
+
+#write_csv(overall_df, "overall_stats.csv", path = "~/Desktop/Overall_stats.csv")
+```
+
+```{r best predictor}
+set.seed(100) 
+
+index = sample(1:nrow(overall_df), 0.7*nrow(overall_df)) 
+
+train = overall_df[index,] # Create the training data 
+test = overall_df[-index,] # Create the test data
+
+dim(test)
+dim(train)
+
+cols = c("GP.x", "HBP", "SF", "SH", "TB", "XBH", "HDP", "GO", "FO", "PA", "GP.y", "AB", "R.x", "H.x", "2B", "3B", "HR.x", "RBI", "BB.x", "K.x", "SB", "CS", "AVG", "OBP", "SLG", "GP.x.x", "IP", "H.y", "R.y", "ER", "BB.y", "K.y", "K/9", "HR.y", "ERA", "GP.y.y", "TC", "PO", "A", "E", "FPCT", "DP", "SBA", "RCS", "GP", "GP_1")
+
+pre_proc_val <- preProcess(train[,cols], method = c("center", "scale"))
+
+train[,cols] = predict(pre_proc_val, train[,cols])
+test[,cols] = predict(pre_proc_val, test[,cols])
+
+summary(train)
+```
+
+```{r regularization}
+cols_reg = c("GP.x", "HBP", "SF", "SH", "TB", "XBH", "HDP", "GO", "FO", "PA", "GP.y", "AB", "R.x", "H.x", "2B", "3B", "HR.x", "RBI", "BB.x", "K.x", "SB", "CS", "AVG", "OBP", "SLG", "GP.x.x", "IP", "H.y", "R.y", "ER", "BB.y", "K.y", "K/9", "HR.y", "ERA", "GP.y.y", "TC", "PO", "A", "E", "FPCT", "DP", "SBA", "RCS", "GP", "GP_1", "PCT")
+
+dummies <- dummyVars(PCT ~ ., data = overall_df[,cols_reg])
+
+train_dummies = predict(dummies, newdata = train[,cols_reg])
+
+test_dummies = predict(dummies, newdata = test[,cols_reg])
+
+print(dim(train_dummies)); print(dim(test_dummies))
+
+x = as.matrix(train_dummies)
+y_train = train$PCT
+
+x_test = as.matrix(test_dummies)
+y_test = test$PCT
+
+lambdas <- 10^seq(2, -3, by = -.1)
+ridge_reg = glmnet(x, y_train, nlambda = 25, alpha = 0, family = 'gaussian', lambda = lambdas, nfolds = 10)
+
+summary(ridge_reg)
+
+cv_ridge <- cv.glmnet(x, y_train, alpha = 0, lambda = lambdas, nfolds = 6)
+optimal_lambda <- cv_ridge$lambda.min
+optimal_lambda
+```
+
+```{r eval results}
+# Compute R^2 from true and predicted values
+eval_results <- function(true, predicted, df) {
+  SSE <- sum((predicted - true)^2)
+  SST <- sum((true - mean(true))^2)
+  R_square <- 1 - SSE / SST
+  RMSE = sqrt(SSE/nrow(df))
+
+  
+  # Model performance metrics
+data.frame(
+  RMSE = RMSE,
+  Rsquare = R_square
+)
+  
+}
+
+# Prediction and evaluation on train data
+predictions_train <- predict(ridge_reg, s = optimal_lambda, newx = x)
+eval_results(y_train, predictions_train, train)
+
+# Prediction and evaluation on test data
+predictions_test <- predict(ridge_reg, s = optimal_lambda, newx = x_test)
+eval_results(y_test, predictions_test, test)
+```
+
+```{r lasso reg}
+lambdas <- 10^seq(2, -3, by = -.1)
+
+# Setting alpha = 1 implements lasso regression
+lasso_reg <- cv.glmnet(x, y_train, alpha = 1, lambda = lambdas, standardize = TRUE, nfolds = 5)
+
+# Best 
+lambda_best <- lasso_reg$lambda.min 
+#lambda_best
+
+lasso_model <- glmnet(x, y_train, alpha = 1, lambda = lambda_best, standardize = TRUE)
+
+predictions_train <- predict(lasso_model, s = lambda_best, newx = x)
+eval_results(y_train, predictions_train, train)
+
+predictions_test <- predict(lasso_model, s = lambda_best, newx = x_test)
+eval_results(y_test, predictions_test, test)
+
+coef(lasso_model)
+```
+
+```{r elastic net}
+# Set training control
+train_cont <- trainControl(method = "repeatedcv",
+                              number = 10,
+                              repeats = 5,
+                              search = "random",
+                              verboseIter = TRUE)
+
+# Train the model
+elastic_reg <- train(PCT ~ .,
+                           data = train %>% select(-c(Year, NAME)),
+                           method = "glmnet",
+                           preProcess = c("center", "scale"),
+                           tuneLength = 10,
+                           trControl = train_cont)
+
+
+# Best tuning parameter
+elastic_reg$bestTune
+
+# Make predictions on training set
+predictions_train <- predict(elastic_reg, x)
+eval_results(y_train, predictions_train, train) 
+
+# Make predictions on test set
+predictions_test <- predict(elastic_reg, x_test)
+eval_results(y_test, predictions_test, test)
+```
+
+```{r 2y chart}
+conf_slg %>% 
+  mutate(Rank = 1:nrow(conf_slg)) %>% 
+  top_n(50)-> conf_slg_graph
+
+coeff = 1
+
+SLG_col = "#154734"
+OB_col = "#BD8B13"
+wOBA_col = "#5CB8B2"
+
+ggplot(conf_slg_graph, aes(x=Rank)) +
+  geom_bar(aes(y=SLG), stat="identity", size=.1, fill=SLG_col, color="black", alpha=.9) + 
+  geom_line(aes(y=OBP), size=1, color = OB_col) + 
+  theme_minimal() +
+  ylab("Slugging Percentage") +
+  xlab("2020-21 Big West Rank") +
+  theme(
+    axis.title.y = element_text(color = SLG_col, size=13, angle = 90),
+    axis.title.x = element_text(color = "black", size = 13)
+  ) +
+  annotate(geom = "text", x = 60, y = .43, size = 5,
+             label = "On Base Percentage", color = OB_col)
+```
+
+```{r correlational testing}
+cor(wp_era$avg_wp, wp_era$avg_OBP)
+
+lm(data = wp_era, avg_wp ~ avg_OBP) -> OBP_lm_tiny
+summary(OBP_lm)
+
+lm(data = overall_df, PCT_1 ~ OBP) -> OBP_lm_large
+summary(OBP_lm_large)
+
+lm(data = overall_df, PCT_1 ~ ERA) -> SLG_lm_large
+summary(SLG_lm_large)
+
+cor.test(overall_df$ERA, overall_df$PCT_1, method = c("pearson", "kendall", "spearman"))
+cor.test(useable_df$SLG, useable_df$PCT_1, method = c("pearson", "kendall", "spearman"))
+cor.test(useable_df$wOBA, useable_df$PCT_1, method = c("pearson", "kendall", "spearman"))
+```
+
+```{r conf ob perc graphs}
+overall_df %>% 
+  mutate(`1B` = H.x - `2B` - `3B` - HR.x) %>% 
+  mutate(wOBA = (0.690*BB.x + 0.722*HBP + 0.888*`1B` + 1.271*`2B` + 1.616*`3B` +2.101*HR.x) / 
+           (AB + BB.x + SF + HBP)) -> overall_df
+
+overall_df  %>% 
+  group_by(NAME) %>% 
+  summarise(avg_era = mean(ERA)) %>% 
+  arrange(desc(avg_era)) -> temp_2 
+
+overall_df %>% 
+  group_by(NAME) %>% 
+  summarise(avg_wp = mean(PCT_1)) -> temp_1
+
+overall_df %>% 
+  group_by(NAME) %>% 
+  summarize(avg_OBP = mean(OBP)) -> temp_3
+
+overall_df %>% 
+  group_by(NAME) %>% 
+  summarize(avg_wOBA = mean(wOBA)) -> temp_4
+
+overall_data_steals %>% 
+  group_by(NAME) %>% 
+  summarise(tot_steals = sum(SBA)) -> temp_5
+
+full_join(temp_1, temp_2, by = "NAME") -> wp_era
+
+full_join(wp_era, temp_3, by = "NAME") -> wp_era
+
+full_join(wp_era, temp_4, by = "NAME") -> wp_era
+
+full_join(wp_era, temp_5, by = "NAME") -> wp_era
+
+wp_era %>% 
+  arrange(desc(avg_wp)) -> wp_era
+
+wp_era$NAME <- factor(wp_era$NAME, levels = wp_era$NAME[order(wp_era$avg_wp)])
+
+coeff = 1
+
+ggplot(wp_era %>% 
+         arrange(desc(avg_wp)), aes(x=fct_rev(NAME), group = 1)) +
+  geom_bar(aes(y=avg_wp), stat="identity", size=.1, fill=SLG_col, color="black", alpha=.9) + 
+  geom_line(aes(y=avg_OBP/coeff), color=OB_col, size = 1) +
+  geom_line(aes(y=avg_wOBA/coeff), color=wOBA_col, size = 1) +
+  scale_x_discrete(labels=c("UC Santa Barbara" = "UCSB", "UC Irvine" = "UCI",
+                              "CSU Bakersfield" = "CSUB", "Long Beach State" = "CSULB", 
+                            "UC San Diego" = "UCSD", "Cal State Fullerton" = "CSUF", 
+                            "UC Riverside" = "UCR", "UC Davis" = "UCD")) +
+  theme_minimal() +
+  ylab("2018-21 Average Win Percentage") +
+  xlab("College") +
+  theme(
+    axis.title.y = element_text(color = SLG_col, size=13, angle = 90),
+    axis.title.x = element_text(color = "black", size = 13), 
+    axis.text.x = element_text(hjust = .4, vjust = .1, color = "black"),
+    axis.text.y = element_text(color = "black")
+    ) +
+  annotate(geom = "text", x = 9.8, y = .62, size = 5,
+             label = "On Base Percentage", color = OB_col) +
+  geom_curve(
+  aes(x = 9.8, y = .6, xend = 9.3, yend = .365),
+  arrow = arrow(
+    length = unit(0.03, "npc"), 
+                type="open" # Describes arrow head (open or closed)
+    ),
+  colour = OB_col,
+  size = 1,
+  angle = 0 # Anything other than 90 or 0 can look unusual
+) +
+  annotate(geom = "text", x = 6, y = .62, size = 5,
+             label = "wOBA", color = wOBA_col) +
+  geom_curve(
+  aes(x = 6, y = .6, xend = 6, yend = .325),
+  arrow = arrow(
+    length = unit(0.03, "npc"), 
+                type="open" 
+    ),
+  colour = wOBA_col,
+  size = 1,
+  angle = 0 
+)
+```
+
+```{r stealing}
+overall_data_steals <- overall_df %>% 
+  mutate(SBA = SB + CS, SBA_PCT = SB / SBA)
+
+cor.test(overall_data_steals$SBA_PCT, overall_data_steals$PCT_1)
+
+coeff = 220
+
+ggplot(wp_era %>% 
+         arrange(desc(avg_wp)), aes(x=fct_rev(NAME), group = 1)) +
+  geom_bar(aes(y=avg_wp), stat="identity", size=.1, fill=SLG_col, color="black", alpha=.9) + 
+  geom_point(aes(y=tot_steals/coeff), size=3, color = OB_col) + 
+  scale_x_discrete(labels=c("UC Santa Barbara" = "UCSB", "UC Irvine" = "UCI",
+                              "CSU Bakersfield" = "CSUB", "Long Beach State" = "CSULB", 
+                            "UC San Diego" = "UCSD", "Cal State Fullerton" = "CSUF", 
+                            "UC Riverside" = "UCR", "UC Davis" = "UCD")) +
+  scale_y_continuous(
+    # Add a second axis and specify its features
+    sec.axis = sec_axis(~.*coeff, name="Stolen Base Attempts")
+  ) +
+  theme_minimal() +
+  theme(
+    axis.title.y = element_text(color = SLG_col, size=13, angle = 90),
+    axis.title.x = element_text(color = "black", size = 13), 
+    axis.text.x = element_text(hjust = .4, vjust = .1, color = "black"),
+    axis.text.y = element_text(color = "black"), 
+    axis.title.y.right = element_text(color = "#BD8B13", size=13)
+    ) +
+  ylab("2018-21 Average Win Percentage") +
+  xlab("College") 
+
+staeling_lm <- lm(data = overall_data_steals, PCT_1 ~ SLG)
+summary(staeling_lm)
+
+overall_data_steals %>% 
+  group_by(Year) %>% 
+  summarise(tot_SBA = sum(SBA))
+```
+
+```{r another stealing graph}
+coeff = 1
+
+ggplot(wp_era %>% 
+         arrange(desc(avg_wp)), aes(x=fct_rev(NAME), group = 1)) +
+  geom_bar(aes(y=avg_wp), stat="identity", size=.1, fill=SLG_col, color="black", alpha=.9) + 
+  geom_point(aes(y=avg_steals.y/coeff), size=3, color = OB_col) + 
+  scale_x_discrete(labels=c("UC Santa Barbara" = "UCSB", "UC Irvine" = "UCI",
+                              "CSU Bakersfield" = "CSUB", "Long Beach State" = "CSULB", 
+                            "UC San Diego" = "UCSD", "Cal State Fullerton" = "CSUF", 
+                            "UC Riverside" = "UCR", "UC Davis" = "UCD")) +
+  scale_y_continuous(
+    # Add a second axis and specify its features
+    sec.axis = sec_axis(~.*coeff, name="2018-21 Steal Success Rate")
+  ) +
+  theme_minimal() +
+  theme(
+    axis.title.y = element_text(color = SLG_col, size=13, angle = 90),
+    axis.title.x = element_text(color = "black", size = 13), 
+    axis.text.x = element_text(hjust = .4, vjust = .1, color = "black"),
+    axis.text.y = element_text(color = "black"), 
+    axis.title.y.right = element_text(color = "#BD8B13", size=13)
+    ) +
+  ylab("2018-21 Average Win Percentage") +
+  xlab("College") 
+```
+
+```{r splitting into training/testing}
+# Split the data into training and test set
+set.seed(123)
+training.samples <- overall_df$PCT %>%
+  createDataPartition(p = 0.8, list = FALSE)
+
+train.data  <- overall_df[training.samples, ]
+test.data <- overall_df[-training.samples, ]
+
+# Predictor variables
+x2 <- model.matrix(PCT~., train.data)[,-1]
+# Outcome variable
+y2 <- train.data$PCT
+```
+
+```{r lasso}
+#best lambda using cross-validation
+set.seed(123) 
+cv <- cv.glmnet(x2, y2, alpha = 1, nfolds = 8)
+
+cv$lambda.min
+
+# Fit the final model on the training data
+lasso_model <- glmnet(x2, y2, alpha = 1, lambda = cv$lambda.min)
+# Dsiplay regression coefficients
+coef(lasso_model)
+
+# Make predictions on the test data
+x.test <- model.matrix(PCT ~., test.data)[,-1]
+#predictions <- lasso_model %>% predict(x.test) %>% as.vector()
+
+# Model performance metrics
+data.frame(
+  RMSE = RMSE(predictions, test.data$PCT),
+  Rsquare = R2(predictions, test.data$PCT)
+)
+```
+
+```{r elastic net}
+# Build the model using the training set
+set.seed(123)
+model <- train(
+  PCT ~., data = train.data, method = "glmnet",
+  trControl = trainControl("cv", number = 10),
+  tuneLength = 10
+)
+
+# Best tuning parameter
+model$bestTune
+
+coef(model$finalModel, model$bestTune$lambda)
+
+# Make predictions on the test data
+x.test <- model.matrix(PCT ~., test.data)[,-1]
+predictions <- model %>% predict(x.test)
+# Model performance metrics
+data.frame(
+  RMSE = RMSE(predictions, test.data$medv),
+  Rsquare = R2(predictions, test.data$medv)
+)
+```
+
+```{r regression predictors for overall}
+num = 4
+
+useable_df <- overall_df %>% 
+  select(-c(Year, NAME, GP.x, GP.x.x, SF, SH, HDP, GO, FO, `GO/FO`, GP.y, GP.y.y, H.y, BB.y, K.y, 
+            `K/9`, HR.y, TC, PO, A, E, DP, RCS, `RCS%`, PB, CI, GP, `W-L`, GP_1, `W-L_1`)) 
+
+backward_models <- regsubsets(PCT_1 ~ ., 
+                     data = useable_df, method = "backward",
+                     nvmax = num)
+
+best_bic_vartable <- summary(backward_models)$outmat[which.min(summary(backward_models)$bic), ]
+
+best_bic_vars <- names(best_bic_vartable[best_bic_vartable == "*"])
+
+best_bic_formula <- paste0("Overall Winning Percentage ~ ", 
+                           str_c(best_bic_vars, collapse = " + "))
+
+coef(backward_models, num)
+
+best_bic_formula
+```
+
+```{r regression predictors for conference}
+num_1 = 4
+
+useable_df <- overall_df %>% 
+  mutate(`1B` = H.x - `2B` - `3B` - HR.x) %>% 
+  mutate(wOBA = (0.690*BB.x + 0.722*HBP + 0.888*`1B` + 1.271*`2B` + 1.616*`3B` + 2.101*HR.x) / 
+           (AB + BB.x + SF + HBP)) %>% 
+  select(-c(Year, NAME, GP.x, GP.x.x, SF, SH, HDP, GO, FO, `GO/FO`, GP.y, GP.y.y, H.y, BB.y, K.y, 
+            `K/9`, HR.y, TC, PO, A, E, DP, RCS, `RCS%`, PB, CI, GP, `W-L`, GP_1, `W-L_1`)) 
+
+backward_models <- regsubsets(PCT ~ ., 
+                     data = useable_df, method = "backward",
+                     nvmax = num_1)
+
+best_bic_vartable <- summary(backward_models)$outmat[which.min(summary(backward_models)$bic), ]
+
+best_bic_vars <- names(best_bic_vartable[best_bic_vartable == "*"])
+
+best_bic_formula <- paste0("Conference Winning Percentage ~ ", 
+                           str_c(best_bic_vars, collapse = " + "))
+
+coef(backward_models, num_1)
+
+best_bic_formula
+```
